@@ -35,7 +35,7 @@ sudo apt-get install ghostscript
 
 ### 1. リポジトリをクローン
 ```bash
-git clone https://github.com/yourusername/pdf-compressor.git
+git clone https://github.com/Haruki1090/pdf-compressor.git
 cd pdf-compressor
 ```
 
@@ -176,11 +176,16 @@ pdf-compressor/
 
 ## 👨‍💻 作者
 
-Your Name - your.email@example.com
+Haruki Inoue 
 
-プロジェクトリンク: https://github.com/yourusername/pdf-compressor
+Email：haruharu.com.109607@gmail.com
+
+X：https://x.com/Haruki_dev
+
+LinkedIn：https://www.linkedin.com/in/haruki1090/
+
+プロジェクトリンク: https://github.com/Haruki1090/pdf-compressor
 
 ## 🙏 謝辞
 
 - [Ghostscript](https://www.ghostscript.com/) - 優秀なPostScript/PDFインタープリター
-- PDFコミュニティの皆様# pdf-compressor
