@@ -165,15 +165,23 @@ class PDFCompressor:
                         print(f"\n[DEBUG] {quality} 失敗: {error_msg}")
                 
                 time.sleep(0.1)  # 進捗表示のため
+            
+            # temp_dirが削除される前に最終ファイルをコピー
+            if best_file and os.path.exists(best_file):
+                if self.debug:
+                    print(f"[DEBUG] 最終選択ファイル: {best_file} (サイズ: {best_size:.2f} MB)")
+                
+                shutil.copy2(best_file, output_path)
+                final_success = True
+            else:
+                if self.debug:
+                    print(f"[DEBUG] best_file が見つかりません: {best_file}")
+                    print(f"[DEBUG] temp_dir 内容: {os.listdir(temp_dir) if os.path.exists(temp_dir) else 'ディレクトリなし'}")
+                final_success = False
         
         print()  # 改行
         
-        if best_file and os.path.exists(best_file):
-            if self.debug:
-                print(f"[DEBUG] 最終選択ファイル: {best_file} (サイズ: {best_size:.2f} MB)")
-            
-            shutil.copy2(best_file, output_path)
-            
+        if final_success:
             if best_size <= target_size_mb:
                 print(f"✅ 圧縮成功!")
                 print(f"📊 圧縮後サイズ: {best_size:.2f} MB")
@@ -186,19 +194,6 @@ class PDFCompressor:
                 print(f"🎨 使用品質: {best_quality}")
                 print(f"📉 圧縮率: {((original_size - best_size) / original_size * 100):.1f}%")
                 return True, "部分圧縮"
-        else:
-            if self.debug:
-                print(f"[DEBUG] best_file が見つかりません: {best_file}")
-                print(f"[DEBUG] temp_dir 内容: {os.listdir(temp_dir) if os.path.exists(temp_dir) else 'ディレクトリなし'}")
-        
-        # すべて失敗した場合
-        error_detail = f"圧縮に失敗しました。最後のエラー: {last_error}" if last_error else "すべての品質レベルで圧縮に失敗しました"
-        
-        # パスワードエラーの可能性をチェック
-        if "password" in last_error.lower() or "encrypted" in last_error.lower():
-            return False, "パスワード付きPDFの可能性があります。-p オプションでパスワードを指定してください。"
-        
-        return False, error_detail
 
 def main():
     parser = argparse.ArgumentParser(
