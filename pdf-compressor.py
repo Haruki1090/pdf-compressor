@@ -142,19 +142,23 @@ class PDFCompressor:
                         if best_file is None or quality_order.index(quality) > quality_order.index(best_quality):
                             if best_file and os.path.exists(best_file):
                                 os.remove(best_file)
-                            best_file = temp_output + "_best"
+                            best_file = os.path.join(temp_dir, f"best_{quality}.pdf")
                             shutil.copy2(temp_output, best_file)
                             best_size = current_size
                             best_quality = quality
+                            if self.debug:
+                                print(f"[DEBUG] 新しいベスト: {quality} ({current_size:.2f} MB)")
                     
-                    # 目標サイズを超えている場合、最小サイズのものを記録
+                    # 目標サイズを超えている場合、最小サイズのものを記録（フォールバック）
                     elif current_size < best_size:
                         if best_file and os.path.exists(best_file):
                             os.remove(best_file)
-                        best_file = temp_output + "_best"
+                        best_file = os.path.join(temp_dir, f"fallback_{quality}.pdf")
                         shutil.copy2(temp_output, best_file)
                         best_size = current_size
                         best_quality = quality
+                        if self.debug:
+                            print(f"[DEBUG] フォールバック更新: {quality} ({current_size:.2f} MB)")
                 else:
                     last_error = error_msg
                     if self.debug:
@@ -165,6 +169,9 @@ class PDFCompressor:
         print()  # 改行
         
         if best_file and os.path.exists(best_file):
+            if self.debug:
+                print(f"[DEBUG] 最終選択ファイル: {best_file} (サイズ: {best_size:.2f} MB)")
+            
             shutil.copy2(best_file, output_path)
             
             if best_size <= target_size_mb:
@@ -179,6 +186,10 @@ class PDFCompressor:
                 print(f"🎨 使用品質: {best_quality}")
                 print(f"📉 圧縮率: {((original_size - best_size) / original_size * 100):.1f}%")
                 return True, "部分圧縮"
+        else:
+            if self.debug:
+                print(f"[DEBUG] best_file が見つかりません: {best_file}")
+                print(f"[DEBUG] temp_dir 内容: {os.listdir(temp_dir) if os.path.exists(temp_dir) else 'ディレクトリなし'}")
         
         # すべて失敗した場合
         error_detail = f"圧縮に失敗しました。最後のエラー: {last_error}" if last_error else "すべての品質レベルで圧縮に失敗しました"
