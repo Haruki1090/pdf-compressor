@@ -13,6 +13,7 @@ from pathlib import Path
 import time
 from typing import Optional, Tuple
 import shutil
+import getpass
 
 class PDFCompressor:
     """PDF圧縮クラス"""
@@ -25,8 +26,9 @@ class PDFCompressor:
         'prepress': '/prepress'   # 300 dpi - 最高品質
     }
     
-    def __init__(self):
+    def __init__(self, debug=False):
         self.ghostscript_cmd = self._find_ghostscript()
+        self.debug = debug
         if not self.ghostscript_cmd:
             raise RuntimeError("Ghostscriptが見つかりません。インストールしてください。")
     
@@ -41,7 +43,7 @@ class PDFCompressor:
         """ファイルサイズをMBで取得"""
         return os.path.getsize(filepath) / (1024 * 1024)
     
-    def _compress_pdf(self, input_path: str, output_path: str, quality: str) -> bool:
+    def _compress_pdf(self, input_path: str, output_path: str, quality: str, password: str = None) -> Tuple[bool, str]:
         """PDF圧縮実行"""
         cmd = [
             self.ghostscript_cmd,
@@ -51,15 +53,38 @@ class PDFCompressor:
             '-dNOPAUSE',
             '-dQUIET',
             '-dBATCH',
-            '-sOutputFile=' + output_path,
-            input_path
+            '-sOutputFile=' + output_path
         ]
         
+        # パスワード付きPDFの場合
+        if password:
+            cmd.extend(['-sPDFPassword=' + password])
+        
+        cmd.append(input_path)
+        
+        if self.debug:
+            print(f"\n[DEBUG] 実行コマンド: {' '.join(cmd)}")
+        
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            return result.returncode == 0
-        except Exception:
-            return False
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if self.debug:
+                print(f"[DEBUG] 戻り値: {result.returncode}")
+                if result.stdout:
+                    print(f"[DEBUG] stdout: {result.stdout}")
+                if result.stderr:
+                    print(f"[DEBUG] stderr: {result.stderr}")
+            
+            if result.returncode == 0:
+                return True, "成功"
+            else:
+                error_msg = result.stderr or result.stdout or "不明なエラー"
+                return False, error_msg
+                
+        except subprocess.TimeoutExpired:
+            return False, "タイムアウト（60秒）"
+        except Exception as e:
+            return False, f"実行エラー: {str(e)}"
     
     def _show_progress(self, current_step: int, total_steps: int, description: str):
         """進捗表示"""
@@ -72,7 +97,7 @@ class PDFCompressor:
         print(f'\r進捗: [{bar}] {percent:.1f}% - {description}', end='', flush=True)
     
     def compress_to_target_size(self, input_path: str, output_path: str, 
-                               target_size_mb: float, max_attempts: int = 4) -> Tuple[bool, str]:
+                               target_size_mb: float, max_attempts: int = 4, password: str = None) -> Tuple[bool, str]:
         """目標サイズに向けてPDF圧縮"""
         
         if not os.path.exists(input_path):
@@ -96,6 +121,7 @@ class PDFCompressor:
         best_file = None
         best_size = float('inf')
         best_quality = None
+        last_error = ""
         
         with tempfile.TemporaryDirectory() as temp_dir:
             for i, quality in enumerate(quality_order):
@@ -103,13 +129,18 @@ class PDFCompressor:
                 
                 temp_output = os.path.join(temp_dir, f"compressed_{quality}.pdf")
                 
-                if self._compress_pdf(input_path, temp_output, quality):
+                success, error_msg = self._compress_pdf(input_path, temp_output, quality, password)
+                
+                if success and os.path.exists(temp_output):
                     current_size = self._get_file_size_mb(temp_output)
+                    
+                    if self.debug:
+                        print(f"\n[DEBUG] {quality}: {current_size:.2f} MB")
                     
                     # 目標サイズ以下で最も品質の高いものを選択
                     if current_size <= target_size_mb:
                         if best_file is None or quality_order.index(quality) > quality_order.index(best_quality):
-                            if best_file:
+                            if best_file and os.path.exists(best_file):
                                 os.remove(best_file)
                             best_file = temp_output + "_best"
                             shutil.copy2(temp_output, best_file)
@@ -118,12 +149,16 @@ class PDFCompressor:
                     
                     # 目標サイズを超えている場合、最小サイズのものを記録
                     elif current_size < best_size:
-                        if best_file:
+                        if best_file and os.path.exists(best_file):
                             os.remove(best_file)
                         best_file = temp_output + "_best"
                         shutil.copy2(temp_output, best_file)
                         best_size = current_size
                         best_quality = quality
+                else:
+                    last_error = error_msg
+                    if self.debug:
+                        print(f"\n[DEBUG] {quality} 失敗: {error_msg}")
                 
                 time.sleep(0.1)  # 進捗表示のため
         
@@ -145,7 +180,14 @@ class PDFCompressor:
                 print(f"📉 圧縮率: {((original_size - best_size) / original_size * 100):.1f}%")
                 return True, "部分圧縮"
         
-        return False, "圧縮に失敗しました"
+        # すべて失敗した場合
+        error_detail = f"圧縮に失敗しました。最後のエラー: {last_error}" if last_error else "すべての品質レベルで圧縮に失敗しました"
+        
+        # パスワードエラーの可能性をチェック
+        if "password" in last_error.lower() or "encrypted" in last_error.lower():
+            return False, "パスワード付きPDFの可能性があります。-p オプションでパスワードを指定してください。"
+        
+        return False, error_detail
 
 def main():
     parser = argparse.ArgumentParser(
@@ -155,7 +197,8 @@ def main():
 使用例:
   %(prog)s input.pdf -s 5                    # 5MBに圧縮
   %(prog)s input.pdf -s 2.5 -o output.pdf   # 2.5MBに圧縮、出力ファイル指定
-  %(prog)s input.pdf -s 10                  # 10MBに圧縮
+  %(prog)s input.pdf -s 10 -p               # パスワード付きPDFを10MBに圧縮
+  %(prog)s input.pdf -s 5 --debug           # デバッグモードで実行
         """
     )
     
@@ -164,8 +207,20 @@ def main():
                        help='目標サイズ (MB)')
     parser.add_argument('-o', '--output', 
                        help='出力ファイル名 (デフォルト: 入力ファイル名_compressed.pdf)')
+    parser.add_argument('-p', '--password', action='store_true',
+                       help='パスワード付きPDF（パスワードを入力）')
+    parser.add_argument('--debug', action='store_true',
+                       help='デバッグモード（詳細情報を表示）')
     
     args = parser.parse_args()
+    
+    # パスワード取得
+    password = None
+    if args.password:
+        password = getpass.getpass("PDFのパスワードを入力してください: ")
+        if not password:
+            print("❌ パスワードが入力されませんでした")
+            sys.exit(1)
     
     # 出力ファイル名の設定
     if args.output:
@@ -175,9 +230,9 @@ def main():
         output_path = str(input_path.parent / f"{input_path.stem}_compressed{input_path.suffix}")
     
     try:
-        compressor = PDFCompressor()
+        compressor = PDFCompressor(debug=args.debug)
         success, message = compressor.compress_to_target_size(
-            args.input, output_path, args.size
+            args.input, output_path, args.size, password=password
         )
         
         if success:
@@ -185,10 +240,20 @@ def main():
             print("🎉 処理完了!")
         else:
             print(f"❌ エラー: {message}")
+            
+            # パスワードが必要な可能性がある場合の追加ヒント
+            if "パスワード" in message and not args.password:
+                print("💡 ヒント: パスワード付きPDFの場合は -p オプションを使用してください")
+            elif args.debug:
+                print("💡 ヒント: 詳細なエラー情報は上記のDEBUG出力を確認してください")
+            
             sys.exit(1)
             
     except Exception as e:
         print(f"❌ エラー: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
 if __name__ == '__main__':
